@@ -4,8 +4,11 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../data/dummy_data.dart';
 import '../models/offer.dart';
+import '../services/routing_service.dart';
 import '../widgets/map_markers.dart';
+import '../widgets/navigation_panel.dart';
 import '../widgets/offer_details_sheet.dart';
+import 'search_screen.dart';
 
 /// Main map screen displaying the map with offers and search functionality.
 class MapScreen extends StatefulWidget {
@@ -37,13 +40,57 @@ class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
   List<LatLng>? _routePoints;
   Offer? _selectedOffer;
+  bool _isLoadingRoute = false;
+  RouteInfo? _currentRouteInfo;
+  double _mapRotation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen to map rotation changes
+    _mapController.mapEventStream.listen((event) {
+      if (event is MapEventRotate || event is MapEventRotateEnd) {
+        setState(() {
+          _mapRotation = _mapController.camera.rotation;
+        });
+      }
+    });
+  }
+
+  /// Check if navigation is active
+  bool get _isNavigating =>
+      _routePoints != null &&
+      _currentRouteInfo != null &&
+      _selectedOffer != null;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: _buildAppBar(),
-      body: Stack(children: [_buildMap(), _buildSearchBar()]),
+      body: Stack(
+        children: [
+          _buildMap(),
+          if (_isNavigating)
+            NavigationPanel(
+              offer: _selectedOffer!,
+              routeInfo: _currentRouteInfo!,
+              onStopNavigation: _clearRoute,
+            )
+          else
+            _buildSearchBar(),
+          if (_isLoadingRoute) _buildLoadingOverlay(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.3),
+      child: const Center(
+        child: CircularProgressIndicator(color: Colors.deepOrange),
+      ),
     );
   }
 
@@ -102,10 +149,14 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Widget _buildMap() {
-    // Build offer markers
+    // Convert map rotation from degrees to radians and negate for counter-rotation
+    final rotationRadians = -_mapRotation * (3.14159265359 / 180);
+
+    // Build offer markers with rotation compensation
     final offerMarkers = MarkerBuilder.buildOfferMarkers(
       offers: DummyData.offers,
       onMarkerTap: _onOfferMarkerTapped,
+      rotationCompensation: rotationRadians,
     );
 
     // Build user location marker
@@ -118,7 +169,11 @@ class _MapScreenState extends State<MapScreen> {
       options: MapOptions(
         initialCenter: DummyData.userLocation,
         initialZoom: _initialZoom,
-        onTap: (_, __) => _clearRoute(),
+        onTap: (_, __) {
+          if (!_isNavigating) {
+            _clearRoute();
+          }
+        },
       ),
       children: [
         TileLayer(
@@ -149,42 +204,68 @@ class _MapScreenState extends State<MapScreen> {
       left: _searchBarHorizontalPadding,
       right: _searchBarHorizontalPadding,
       bottom: _searchBarBottomOffset,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(_searchBarRadius),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 20,
-              offset: const Offset(0, 5),
-            ),
-          ],
-        ),
-        child: TextField(
-          decoration: InputDecoration(
-            hintText: _searchHint,
-            hintStyle: TextStyle(color: Colors.grey[400], fontSize: 16),
-            prefixIcon: Icon(Icons.search, color: Colors.grey[500]),
-            border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 20,
-              vertical: 15,
+      child: GestureDetector(
+        onTap: _openSearchScreen,
+        child: Hero(
+          tag: 'search_bar',
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(_searchBarRadius),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 20,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 15,
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.search, color: Colors.grey[500]),
+                    const SizedBox(width: 12),
+                    Text(
+                      _searchHint,
+                      style: TextStyle(color: Colors.grey[400], fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-          onSubmitted: _onSearchSubmitted,
         ),
       ),
     );
   }
 
-  // Event handlers
+  // --------------- Event Handlers ---------------
   void _onMenuPressed() {
     // TODO: Handle menu action
   }
 
-  void _onSearchSubmitted(String query) {
-    // TODO: Handle search submission
+  void _openSearchScreen() async {
+    final selectedOffer = await Navigator.push<Offer>(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const SearchScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+
+    if (selectedOffer != null) {
+      _onOfferMarkerTapped(selectedOffer);
+    }
   }
 
   void _onOfferMarkerTapped(Offer offer) {
@@ -202,39 +283,50 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  void _showDirections(Offer offer) {
-    // Calculate a simple straight-line route for now
-    // In production, you would use a routing API like OSRM or Google Directions
-    final points = _calculateSimpleRoute(
+  void _showDirections(Offer offer) async {
+    setState(() {
+      _isLoadingRoute = true;
+      _selectedOffer = offer;
+    });
+
+    // Fetch route from Valhalla API
+    final routeInfo = await RoutingService.getRouteInfo(
       DummyData.userLocation,
       offer.location,
     );
 
-    setState(() {
-      _routePoints = points;
-    });
+    if (routeInfo != null) {
+      setState(() {
+        _routePoints = routeInfo.points;
+        _currentRouteInfo = routeInfo;
+        _isLoadingRoute = false;
+      });
 
-    // Fit the map to show the entire route
-    _fitMapToRoute(points);
-  }
+      // Fit the map to show the entire route
+      _fitMapToRoute(routeInfo.points);
+    } else {
+      setState(() {
+        _isLoadingRoute = false;
+        _selectedOffer = null;
+      });
 
-  List<LatLng> _calculateSimpleRoute(LatLng start, LatLng end) {
-    // Simple interpolation for a curved path effect
-    // In a real app, this would be replaced with actual routing data
-    final points = <LatLng>[];
-    const steps = 20;
-
-    for (int i = 0; i <= steps; i++) {
-      final t = i / steps;
-      // Add slight curve for visual effect
-      final curve = (1 - (2 * t - 1).abs()) * 0.002;
-      final lat = start.latitude + (end.latitude - start.latitude) * t;
-      final lng =
-          start.longitude + (end.longitude - start.longitude) * t + curve;
-      points.add(LatLng(lat, lng));
+      // Show error if route couldn't be fetched
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Could not fetch directions. Please try again.',
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          ),
+        );
+      }
     }
-
-    return points;
   }
 
   void _fitMapToRoute(List<LatLng> points) {
@@ -247,11 +339,10 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _clearRoute() {
-    if (_routePoints != null) {
-      setState(() {
-        _routePoints = null;
-        _selectedOffer = null;
-      });
-    }
+    setState(() {
+      _routePoints = null;
+      _selectedOffer = null;
+      _currentRouteInfo = null;
+    });
   }
 }

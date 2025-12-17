@@ -8,56 +8,65 @@ import '../models/offer.dart';
 class OfferMarker extends StatelessWidget {
   final Offer offer;
   final VoidCallback onTap;
+  final double rotationCompensation;
 
-  const OfferMarker({super.key, required this.offer, required this.onTap});
+  const OfferMarker({
+    super.key,
+    required this.offer,
+    required this.onTap,
+    this.rotationCompensation = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.deepOrange, width: 3),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: ClipOval(
-              child: Padding(
-                padding: const EdgeInsets.all(6),
-                child: Image.network(
-                  offer.logoUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Center(
-                      child: Text(
-                        offer.brandName[0],
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.deepOrange,
+      child: Transform.rotate(
+        angle: rotationCompensation,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.deepOrange, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: ClipOval(
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Image.network(
+                    offer.logoUrl,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Center(
+                        child: Text(
+                          offer.brandName[0],
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.deepOrange,
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
-          ),
-          // Pointer triangle
-          CustomPaint(size: const Size(16, 10), painter: _TrianglePainter()),
-        ],
+            // Pointer triangle
+            CustomPaint(size: const Size(16, 10), painter: _TrianglePainter()),
+          ],
+        ),
       ),
     );
   }
@@ -117,13 +126,18 @@ class MarkerBuilder {
   static List<Marker> buildOfferMarkers({
     required List<Offer> offers,
     required Function(Offer) onMarkerTap,
+    double rotationCompensation = 0,
   }) {
     return offers.map((offer) {
       return Marker(
         point: offer.location,
         width: 50,
         height: 65,
-        child: OfferMarker(offer: offer, onTap: () => onMarkerTap(offer)),
+        child: OfferMarker(
+          offer: offer,
+          onTap: () => onMarkerTap(offer),
+          rotationCompensation: rotationCompensation,
+        ),
       );
     }).toList();
   }
