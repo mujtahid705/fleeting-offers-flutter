@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 import '../data/dummy_data.dart';
 import '../models/offer.dart';
 import '../services/routing_service.dart';
+import '../widgets/explore_panel.dart';
 import '../widgets/map_markers.dart';
 import '../widgets/navigation_panel.dart';
 import '../widgets/offer_details_sheet.dart';
@@ -33,11 +34,14 @@ class _MapScreenState extends State<MapScreen> {
 
   // UI dimensions
   static const double _searchBarRadius = 30;
-  static const double _searchBarBottomOffset = 40;
   static const double _searchBarHorizontalPadding = 20;
+  static const double _minSheetHeight = 0.12;
+  static const double _maxSheetHeight = 0.7;
 
   // State
   final MapController _mapController = MapController();
+  final DraggableScrollableController _sheetController =
+      DraggableScrollableController();
   List<LatLng>? _routePoints;
   Offer? _selectedOffer;
   bool _isLoadingRoute = false;
@@ -47,7 +51,6 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-    // Listen to map rotation changes
     _mapController.mapEventStream.listen((event) {
       if (event is MapEventRotate || event is MapEventRotateEnd) {
         setState(() {
@@ -55,6 +58,12 @@ class _MapScreenState extends State<MapScreen> {
         });
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _sheetController.dispose();
+    super.dispose();
   }
 
   /// Check if navigation is active
@@ -78,7 +87,7 @@ class _MapScreenState extends State<MapScreen> {
               onStopNavigation: _clearRoute,
             )
           else
-            _buildSearchBar(),
+            _buildExploreSheet(),
           if (_isLoadingRoute) _buildLoadingOverlay(),
         ],
       ),
@@ -199,44 +208,65 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  // Explore sheet with search bar
+  Widget _buildExploreSheet() {
+    return DraggableScrollableSheet(
+      controller: _sheetController,
+      initialChildSize: _minSheetHeight,
+      minChildSize: _minSheetHeight,
+      maxChildSize: _maxSheetHeight,
+      snap: true,
+      snapSizes: const [_minSheetHeight, 0.4, _maxSheetHeight],
+      builder: (context, scrollController) {
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            ExplorePanel(
+              onOfferTap: _onOfferMarkerTapped,
+              scrollController: scrollController,
+            ),
+            Positioned(
+              top: -60,
+              left: _searchBarHorizontalPadding,
+              right: _searchBarHorizontalPadding,
+              child: _buildSearchBar(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildSearchBar() {
-    return Positioned(
-      left: _searchBarHorizontalPadding,
-      right: _searchBarHorizontalPadding,
-      bottom: _searchBarBottomOffset,
-      child: GestureDetector(
-        onTap: _openSearchScreen,
-        child: Hero(
-          tag: 'search_bar',
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(_searchBarRadius),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 20,
-                    offset: const Offset(0, 5),
+    return GestureDetector(
+      onTap: _openSearchScreen,
+      child: Hero(
+        tag: 'search_bar',
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(_searchBarRadius),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 20,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+              child: Row(
+                children: [
+                  Icon(Icons.search, color: Colors.grey[500]),
+                  const SizedBox(width: 12),
+                  Text(
+                    _searchHint,
+                    style: TextStyle(color: Colors.grey[400], fontSize: 16),
                   ),
                 ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 15,
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.search, color: Colors.grey[500]),
-                    const SizedBox(width: 12),
-                    Text(
-                      _searchHint,
-                      style: TextStyle(color: Colors.grey[400], fontSize: 16),
-                    ),
-                  ],
-                ),
               ),
             ),
           ),
@@ -245,7 +275,7 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  // --------------- Event Handlers ---------------
+  // Event Handlers
   void _onMenuPressed() {
     // TODO: Handle menu action
   }
